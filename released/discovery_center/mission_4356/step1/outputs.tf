@@ -3,9 +3,19 @@ output "subaccount_id" {
   description = "The ID of the subaccount."
 }
 
+output "integrationsuite_subscription_url" {
+  value       = btp_subaccount_subscription.integrationsuite.subscription_url
+  description = "SAP Integration Suite subscription URL."
+}
+
+output "custom_idp" {
+  value       = var.custom_idp
+  description = "The custom identity provider."
+}
+
 output "cf_api_url" {
   value       = jsondecode(btp_subaccount_environment_instance.cloudfoundry.labels)["API Endpoint"]
-  description = "The Cloudfoundry API endpoint."
+  description = "The Cloudfoundry API Url."
 }
 
 output "cf_landscape_label" {

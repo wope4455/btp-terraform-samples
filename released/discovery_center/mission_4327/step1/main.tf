@@ -2,14 +2,22 @@
 # Generating random ID for subdomain
 ###############################################################################################
 resource "random_uuid" "uuid" {}
+
+locals {
+  random_uuid       = random_uuid.uuid.result
+  subaccount_domain = "btp-gp${local.random_uuid}"
+  subaccount_cf_org = length(var.cf_org_name) > 0 ? var.cf_org_name : substr(replace("${local.subaccount_domain}", "-", ""), 0, 32)
+}
+
 ###############################################################################################
 # Creation of subaccount
 ###############################################################################################
 resource "btp_subaccount" "project" {
   name      = var.subaccount_name
-  subdomain = "btp-gp${random_uuid.uuid.result}"
+  subdomain = local.subaccount_domain
   region    = lower(var.region)
 }
+
 data "btp_whoami" "me" {}
 
 data "btp_subaccount_environments" "all" {
@@ -27,7 +35,7 @@ resource "terraform_data" "cf_landscape_label" {
 ###############################################################################################
 resource "btp_subaccount_environment_instance" "cloudfoundry" {
   subaccount_id    = btp_subaccount.project.id
-  name             = btp_subaccount.project.subdomain
+  name             = local.subaccount_cf_org
   landscape_label  = terraform_data.cf_landscape_label.output
   environment_type = "cloudfoundry"
   service_name     = "cloudfoundry"
@@ -36,7 +44,7 @@ resource "btp_subaccount_environment_instance" "cloudfoundry" {
   # the instance shall be created using the parameter landscape label. 
   # available environments can be looked up using the btp_subaccount_environments datasource
   parameters = jsonencode({
-    instance_name = btp_subaccount.project.subdomain
+    instance_name = local.subaccount_cf_org
   })
   timeouts = {
     create = "1h"
@@ -49,58 +57,19 @@ resource "btp_subaccount_environment_instance" "cloudfoundry" {
 # Assignment of users as sub account administrators
 ###############################################################################################
 resource "btp_subaccount_role_collection_assignment" "subaccount-admins" {
-  for_each             = toset("${var.subaccount_admins}")
+  for_each             = toset(var.subaccount_admins)
   subaccount_id        = btp_subaccount.project.id
   role_collection_name = "Subaccount Administrator"
   user_name            = each.value
 }
 ######################################################################
-# Add entitlement for BAS, Subscribe BAS and add roles
-######################################################################
-resource "btp_subaccount_entitlement" "bas" {
-  subaccount_id = btp_subaccount.project.id
-  service_name  = "sapappstudio"
-  plan_name     = var.bas_plan_name
-}
-resource "btp_subaccount_subscription" "bas-subscribe" {
-  subaccount_id = btp_subaccount.project.id
-  app_name      = "sapappstudio"
-  plan_name     = var.bas_plan_name
-  depends_on    = [btp_subaccount_entitlement.bas]
-}
-resource "btp_subaccount_role_collection_assignment" "Business_Application_Studio_Administrator" {
-  subaccount_id        = btp_subaccount.project.id
-  role_collection_name = "Business_Application_Studio_Administrator"
-  user_name            = data.btp_whoami.me.email
-  depends_on           = [btp_subaccount_subscription.bas-subscribe]
-}
-
-
-resource "btp_subaccount_role_collection_assignment" "Business_Application_Studio_Developer" {
-  subaccount_id        = btp_subaccount.project.id
-  role_collection_name = "Business_Application_Studio_Developer"
-  user_name            = data.btp_whoami.me.email
-  depends_on           = [btp_subaccount_subscription.bas-subscribe]
-}
-######################################################################
-# Add Build Workzone entitlement subscription and role Assignment
+# Add Build Workzone entitlement
 ######################################################################
 resource "btp_subaccount_entitlement" "build_workzone" {
   subaccount_id = btp_subaccount.project.id
   service_name  = "SAPLaunchpad"
-  plan_name     = var.build_workzone_plan_name
-}
-resource "btp_subaccount_subscription" "build_workzone_subscribe" {
-  subaccount_id = btp_subaccount.project.id
-  app_name      = "SAPLaunchpad"
-  plan_name     = var.build_workzone_plan_name
-  depends_on    = [btp_subaccount_entitlement.build_workzone]
-}
-resource "btp_subaccount_role_collection_assignment" "launchpad_admin" {
-  subaccount_id        = btp_subaccount.project.id
-  role_collection_name = "Launchpad_Admin"
-  user_name            = data.btp_whoami.me.email
-  depends_on           = [btp_subaccount_subscription.build_workzone_subscribe]
+  plan_name     = var.service_plan__build_workzone
+  amount        = var.service_plan__build_workzone == "free" ? 1 : null
 }
 ######################################################################
 # Create HANA entitlement subscription
@@ -108,7 +77,7 @@ resource "btp_subaccount_role_collection_assignment" "launchpad_admin" {
 resource "btp_subaccount_entitlement" "hana-cloud" {
   subaccount_id = btp_subaccount.project.id
   service_name  = "hana-cloud"
-  plan_name     = var.hana-cloud_plan_name
+  plan_name     = var.service_plan__hana_cloud
 }
 # Enable HANA Cloud Tools
 resource "btp_subaccount_entitlement" "hana-cloud-tools" {
@@ -122,8 +91,46 @@ resource "btp_subaccount_subscription" "hana-cloud-tools" {
   plan_name     = "tools"
   depends_on    = [btp_subaccount_entitlement.hana-cloud-tools]
 }
+# Assign users to Role Collection: SAP HANA Cloud Administrator
+resource "btp_subaccount_role_collection_assignment" "hana-cloud-admin" {
+  for_each             = toset(var.hana_cloud_admins)
+  subaccount_id        = btp_subaccount.project.id
+  role_collection_name = "SAP HANA Cloud Administrator"
+  user_name            = each.value
+  depends_on           = [btp_subaccount_subscription.hana-cloud-tools]
+}
 resource "btp_subaccount_entitlement" "hana-hdi-shared" {
   subaccount_id = btp_subaccount.project.id
   service_name  = "hana"
   plan_name     = "hdi-shared"
+}
+
+###############################################################################################
+# Prepare and setup app: Continuous Integration & Delivery
+###############################################################################################
+# Entitle subaccount for usage of app Continuous Integration & Delivery
+resource "btp_subaccount_entitlement" "cicd_app" {
+  subaccount_id = btp_subaccount.project.id
+  service_name  = "cicd-app"
+  plan_name     = var.cicd_service_plan
+}
+
+locals {
+  cf_org_users  = setsubtract(toset(var.cf_org_users), [data.btp_whoami.me.email])
+  cf_org_admins = setsubtract(toset(var.cf_org_admins), [data.btp_whoami.me.email])
+}
+
+resource "local_file" "output_vars_step1" {
+  count    = var.create_tfvars_file_for_next_stage ? 1 : 0
+  content  = <<-EOT
+      cf_api_url          = "${jsondecode(btp_subaccount_environment_instance.cloudfoundry.labels)["API Endpoint"]}"
+      cf_org_id           = "${btp_subaccount_environment_instance.cloudfoundry.platform_id}"
+      
+      cf_org_users        = ${jsonencode(local.cf_org_users)}
+      cf_org_admins       = ${jsonencode(local.cf_org_admins)}
+      cf_space_developers = ${jsonencode(var.cf_space_developers)}
+      cf_space_managers   = ${jsonencode(var.cf_space_managers)}
+
+      EOT
+  filename = "../step2_cf/terraform.tfvars"
 }
