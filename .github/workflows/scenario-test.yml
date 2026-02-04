@@ -32,7 +32,7 @@ jobs:
     steps:
       - name: Check out Git repository
         id: checkout_repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Setup Terraform
         id : setup_terraform
         uses: hashicorp/setup-terraform@v3
@@ -83,12 +83,12 @@ jobs:
           fi
       - name: Check out provider repository
         id: checkout_provider_repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: SAP/terraform-provider-btp
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: 'go.mod'
 
@@ -106,7 +106,7 @@ jobs:
 
       - name: Check out Github repository
         id: checkout_github_repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Terraform Init
         id: init_terraform
@@ -157,7 +157,7 @@ jobs:
     if: ${{ always() && (needs.setup_infrastructure.result == 'failure') }}
     steps:
       - name: Create issue
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const issueTitle = `Automated Issue Alert: DC Missions Scenario Tests Failure`;
